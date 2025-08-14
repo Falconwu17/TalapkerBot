@@ -1,3 +1,5 @@
+version: '3.9'
+
 services:
   db:
     image: postgres:15
@@ -7,23 +9,78 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
     volumes:
-      - ./volumes/db/init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5432:5432"
+      - ./content-api/volumes/db/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d talapker" ]
       interval: 5s
       timeout: 3s
       retries: 10
 
-  app:
+  content-api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ./content-api/Dockerfile
+    container_name: content_api
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL","curl -f http://localhost:8080/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  bot:
+    build:
+      context: .
+      dockerfile: ./bot/Dockerfile
     container_name: telegram_bot
     env_file:
-      - ./.env
+      - .env
     restart: unless-stopped
     depends_on:
-        db:
-          condition: service_healthy
+      content-api:
+        condition: service_healthy
+      nlp-api:
+        condition: service_healthy
+
+  nlp-api:
+    build:
+      context: ./nlp-api
+      dockerfile: Dockerfile
+    container_name: nlp_api
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import http.client as h;c=h.HTTPConnection('localhost',5000,timeout=3);c.request('GET','/health');exit(0) if c.getresponse().status==200 else exit(1)" ]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    depends_on:
+      ollama:
+        condition: service_healthy
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    healthcheck:
+      test: [ "CMD", "ollama", "list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+volumes:
+  ollama:
+
+
