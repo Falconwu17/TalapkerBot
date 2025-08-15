@@ -36,6 +36,38 @@ type chatReq struct {
 type chatResp struct {
 	Answer string `json:"answer"`
 }
+type chatPlusResp struct {
+	IntentSlug       string  `json:"intent_slug"`
+	IntentConfidence float64 `json:"intent_confidence"`
+	MiniAnswer       *string `json:"mini_answer"`
+	LLMAnswer        string  `json:"llm_answer"`
+}
+
+func (c *Client) ChatPlus(text, lang string, history []map[string]string) (mini *string, llm string, err error) {
+	sys := map[string]string{"role": "system", "content": systemForLang(lang)}
+	msgs := append([]map[string]string{sys}, history...)
+	body, _ := json.Marshal(struct {
+		Text    string              `json:"text"`
+		History []map[string]string `json:"history,omitempty"`
+	}{Text: text, History: msgs})
+
+	req, err := http.NewRequest("POST", c.Base+"/chat_plus", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HC.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	var out chatPlusResp
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, "", err
+	}
+	return out.MiniAnswer, out.LLMAnswer, nil
+}
 
 func (c *Client) Classify(text string) (slug string, conf float64, err error) {
 	body, _ := json.Marshal(askReq{Text: text})
@@ -61,9 +93,9 @@ func (c *Client) Classify(text string) (slug string, conf float64, err error) {
 
 func systemForLang(lang string) string {
 	if lang == "kz" {
-		return "Сен TalapkerBot WKATU көмекшісісің. ҚОЛДАНУШЫ ҚАЗАҚША ЖАЗСА — ҚАЗАҚША ЖАУАП БЕР. Қысқа және нақты жауап бер. Университет жайлы факті ойдан қоспа."
+		return "Сен TalapkerBot WKATU көмекшісісің. Пайдаланушы қай тілде жазса, сол тілде қысқа да нақты жауап бер."
 	}
-	return "Ты помощник TalapkerBot WKATU. ОТВЕЧАЙ НА ТОМ ЖЕ ЯЗЫКЕ, ЧТО И ПОЛЬЗОВАТЕЛЬ (рус/каз). Отвечай кратко и по делу. Не выдумывай факты об университете."
+	return "Ты помощник TalapkerBot WKATU. Отвечай кратко и на том же языке, что и пользователь."
 }
 
 func (c *Client) Chat(text, lang string, history []map[string]string) (string, error) {
